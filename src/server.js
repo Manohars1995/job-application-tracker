@@ -19,6 +19,10 @@ const server = http.createServer(app);
 // ==========================================
 
 const allowedOrigins = [
+  // Production Firebase frontend
+  "https://jobtracker-28685.web.app",
+  "https://jobtracker-28685.firebaseapp.com",
+
   // Local browser
   "http://localhost:5173",
   "http://localhost:5174",
@@ -27,10 +31,69 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
 
-  // Mobile / LAN access
+  // LAN access
   "http://192.168.29.87:5173",
   "http://192.168.29.87:5174",
 ];
+
+// Add FRONTEND_URL from environment if provided
+if (
+  process.env.FRONTEND_URL &&
+  !allowedOrigins.includes(process.env.FRONTEND_URL)
+) {
+  allowedOrigins.push(
+    process.env.FRONTEND_URL
+  );
+}
+
+console.log("=================================");
+console.log("Allowed frontend origins:");
+
+allowedOrigins.forEach((origin) => {
+  console.log(`  ✓ ${origin}`);
+});
+
+console.log("=================================");
+
+// ==========================================
+// CORS ORIGIN CHECK
+// ==========================================
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests without Origin
+    // Example: curl, Postman, server-to-server
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.log("Blocked CORS origin:", origin);
+
+    return callback(
+      new Error(`CORS blocked: ${origin}`)
+    );
+  },
+
+  credentials: true,
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+  ],
+};
 
 // ==========================================
 // SOCKET.IO
@@ -39,8 +102,6 @@ const allowedOrigins = [
 const io = new Server(server, {
   cors: {
     origin: function (origin, callback) {
-      // Allow requests without Origin
-      // Example: Postman / curl
       if (!origin) {
         return callback(null, true);
       }
@@ -56,7 +117,7 @@ const io = new Server(server, {
 
       return callback(
         new Error(
-          "Not allowed by Socket.IO CORS"
+          `Socket.IO CORS blocked: ${origin}`
         )
       );
     },
@@ -85,46 +146,10 @@ connectDB();
 // CORS
 // ==========================================
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests without Origin
-      // Example: Postman / curl
-      if (!origin) {
-        return callback(null, true);
-      }
+app.use(cors(corsOptions));
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      console.log(
-        "Blocked CORS origin:",
-        origin
-      );
-
-      return callback(
-        new Error(`CORS blocked: ${origin}`)
-      );
-    },
-
-    credentials: true,
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ],
-  })
-);
+// Handle preflight requests
+app.options("*", cors(corsOptions));
 
 // ==========================================
 // BODY PARSER
@@ -140,17 +165,6 @@ app.use(
 
 // ==========================================
 // STATIC UPLOADED FILES
-// ==========================================
-//
-// Uploaded job description screenshots will be
-// available through:
-//
-// http://localhost:5000/uploads/...
-//
-// Mobile/LAN:
-//
-// http://192.168.29.87:5000/uploads/...
-//
 // ==========================================
 
 app.use(
@@ -196,13 +210,6 @@ app.use(
   settingRoutes
 );
 
-app.use(
-  "/uploads",
-  express.static(
-    path.join(__dirname, "uploads")
-  )
-);
-
 // ==========================================
 // SOCKET.IO CONNECTION
 // ==========================================
@@ -218,6 +225,18 @@ io.on("connection", (socket) => {
       "Frontend disconnected:",
       socket.id
     );
+  });
+});
+
+// ==========================================
+// 404 HANDLER
+// ==========================================
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+    path: req.originalUrl,
   });
 });
 
@@ -247,9 +266,22 @@ app.use(
       });
     }
 
+    // CORS errors
+    if (
+      err.message &&
+      err.message.startsWith("CORS blocked")
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: err.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: err.message,
+      message:
+        err.message ||
+        "Internal server error",
     });
   }
 );
@@ -278,33 +310,15 @@ server.listen(
     );
 
     console.log(
-      `Server running at: http://localhost:${PORT}`
+      `Server running on port ${PORT}`
     );
 
     console.log(
-      `Network API: http://192.168.29.87:${PORT}/api`
+      `API: http://localhost:${PORT}/api`
     );
 
     console.log(
-      `Health Check: http://192.168.29.87:${PORT}/api/health`
-    );
-
-    console.log(
-      `Uploads: http://192.168.29.87:${PORT}/uploads`
-    );
-
-    console.log(
-      "---------------------------------"
-    );
-
-    console.log(
-      "Allowed frontend origins:"
-    );
-
-    allowedOrigins.forEach(
-      (origin) => {
-        console.log(`  ✓ ${origin}`);
-      }
+      `Health: http://localhost:${PORT}/api/health`
     );
 
     console.log(
