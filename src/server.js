@@ -14,60 +14,65 @@ const settingRoutes = require("./routes/settingRoutes");
 const app = express();
 const server = http.createServer(app);
 
-// ==========================================
+// ======================================================
 // ALLOWED FRONTEND ORIGINS
-// ==========================================
+// ======================================================
 
 const allowedOrigins = [
   // Production Firebase frontend
   "https://jobtracker-28685.web.app",
   "https://jobtracker-28685.firebaseapp.com",
 
-  // Local browser
+  // Local development
   "http://localhost:5173",
   "http://localhost:5174",
 
-  // Local IP
+  // Localhost IP
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
 
-  // LAN access
+  // LAN development
   "http://192.168.29.87:5173",
   "http://192.168.29.87:5174",
 ];
 
-// Add FRONTEND_URL from environment if provided
+// Add FRONTEND_URL from Render/environment if provided
 if (
   process.env.FRONTEND_URL &&
   !allowedOrigins.includes(process.env.FRONTEND_URL)
 ) {
-  allowedOrigins.push(
-    process.env.FRONTEND_URL
-  );
+  allowedOrigins.push(process.env.FRONTEND_URL);
 }
+
+// Remove accidental trailing slashes
+const normalizedOrigins = allowedOrigins
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
 
 console.log("=================================");
 console.log("Allowed frontend origins:");
 
-allowedOrigins.forEach((origin) => {
+normalizedOrigins.forEach((origin) => {
   console.log(`  ✓ ${origin}`);
 });
 
 console.log("=================================");
 
-// ==========================================
-// CORS ORIGIN CHECK
-// ==========================================
+// ======================================================
+// CORS OPTIONS
+// ======================================================
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests without Origin
-    // Example: curl, Postman, server-to-server
+    // Requests without Origin:
+    // curl, Postman, server-to-server, etc.
     if (!origin) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin)) {
+    const normalizedOrigin = origin.replace(/\/$/, "");
+
+    if (normalizedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
 
@@ -93,20 +98,25 @@ const corsOptions = {
     "Content-Type",
     "Authorization",
   ],
+
+  optionsSuccessStatus: 204,
 };
 
-// ==========================================
+// ======================================================
 // SOCKET.IO
-// ==========================================
+// ======================================================
 
 const io = new Server(server, {
   cors: {
     origin: function (origin, callback) {
+      // Allow curl/Postman/server requests
       if (!origin) {
         return callback(null, true);
       }
 
-      if (allowedOrigins.includes(origin)) {
+      const normalizedOrigin = origin.replace(/\/$/, "");
+
+      if (normalizedOrigins.includes(normalizedOrigin)) {
         return callback(null, true);
       }
 
@@ -136,24 +146,31 @@ const io = new Server(server, {
 
 app.set("io", io);
 
-// ==========================================
+// ======================================================
 // DATABASE
-// ==========================================
+// ======================================================
 
 connectDB();
 
-// ==========================================
+// ======================================================
 // CORS
-// ==========================================
+// ======================================================
+
+// Express CORS middleware automatically handles
+// OPTIONS/preflight requests.
+//
+// IMPORTANT:
+// Do NOT use:
+//
+// app.options("*", cors(corsOptions));
+//
+// Express 5 does not accept the "*" wildcard route.
 
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options("*", cors(corsOptions));
-
-// ==========================================
+// ======================================================
 // BODY PARSER
-// ==========================================
+// ======================================================
 
 app.use(express.json());
 
@@ -163,56 +180,63 @@ app.use(
   })
 );
 
-// ==========================================
-// STATIC UPLOADED FILES
-// ==========================================
+// ======================================================
+// STATIC UPLOADS
+// ======================================================
+
+const uploadsPath = path.join(
+  __dirname,
+  "uploads"
+);
 
 app.use(
   "/uploads",
-  express.static(
-    path.join(__dirname, "uploads")
-  )
+  express.static(uploadsPath)
 );
 
-// ==========================================
+// ======================================================
 // BASIC ROUTES
-// ==========================================
+// ======================================================
 
 app.get("/", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     message: "Job Application Tracker Backend",
   });
 });
 
+// ======================================================
+// HEALTH CHECK
+// ======================================================
+
 app.get("/api/health", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     message: "API is healthy",
   });
 });
 
-// ==========================================
+// ======================================================
 // APPLICATION ROUTES
-// ==========================================
+// ======================================================
 
 app.use(
   "/api/applications",
   applicationRoutes
 );
 
-// ==========================================
+// ======================================================
 // SETTINGS ROUTES
-// ==========================================
+// ======================================================
 
 app.use(
   "/api/settings",
   settingRoutes
 );
 
-// ==========================================
+// ======================================================
 // SOCKET.IO CONNECTION
-// ==========================================
+// ======================================================
 
 io.on("connection", (socket) => {
   console.log(
@@ -220,17 +244,19 @@ io.on("connection", (socket) => {
     socket.id
   );
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     console.log(
       "Frontend disconnected:",
-      socket.id
+      socket.id,
+      "Reason:",
+      reason
     );
   });
 });
 
-// ==========================================
+// ======================================================
 // 404 HANDLER
-// ==========================================
+// ======================================================
 
 app.use((req, res) => {
   res.status(404).json({
@@ -240,9 +266,9 @@ app.use((req, res) => {
   });
 });
 
-// ==========================================
+// ======================================================
 // ERROR HANDLER
-// ==========================================
+// ======================================================
 
 app.use(
   (
@@ -252,11 +278,22 @@ app.use(
     next
   ) => {
     console.error(
+      "================================="
+    );
+
+    console.error(
       "Server Error:",
       err.message
     );
 
-    // Multer file upload errors
+    console.error(
+      "================================="
+    );
+
+    // ----------------------------------------------
+    // Multer errors
+    // ----------------------------------------------
+
     if (
       err.name === "MulterError"
     ) {
@@ -266,10 +303,20 @@ app.use(
       });
     }
 
+    // ----------------------------------------------
     // CORS errors
+    // ----------------------------------------------
+
     if (
       err.message &&
-      err.message.startsWith("CORS blocked")
+      (
+        err.message.startsWith(
+          "CORS blocked"
+        ) ||
+        err.message.startsWith(
+          "Socket.IO CORS blocked"
+        )
+      )
     ) {
       return res.status(403).json({
         success: false,
@@ -277,7 +324,11 @@ app.use(
       });
     }
 
-    res.status(500).json({
+    // ----------------------------------------------
+    // General server error
+    // ----------------------------------------------
+
+    return res.status(500).json({
       success: false,
       message:
         err.message ||
@@ -286,9 +337,9 @@ app.use(
   }
 );
 
-// ==========================================
+// ======================================================
 // SERVER
-// ==========================================
+// ======================================================
 
 const PORT =
   process.env.PORT || 5000;
@@ -319,6 +370,10 @@ server.listen(
 
     console.log(
       `Health: http://localhost:${PORT}/api/health`
+    );
+
+    console.log(
+      `Uploads: http://localhost:${PORT}/uploads`
     );
 
     console.log(
